@@ -12,6 +12,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from app.config import settings
+from app.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -24,9 +25,8 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support (will be connected in Step A2)
-target_metadata = None
+# add your model's MetaData object here for 'autogenerate' support
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
