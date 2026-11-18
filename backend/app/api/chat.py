@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.runner import run_agent
 from app.core.auth import get_current_user
+from app.core.guardrails import mask_pii, screen_prompt_injection
 from app.core.rate_limit import check_rate_limit
 from app.db import SessionLocal, get_db
 from app.models.message import Message
@@ -80,7 +81,19 @@ def send_chat_message(
     # 1. Determine or generate session_id
     session_id = payload.session_id.strip() if payload.session_id else str(uuid.uuid4())
 
-    # 2. Load recent conversation history (last 4 messages) for multi-turn context
+    # 2. Screen for prompt injection / instruction override attempts
+    is_injected, warning_msg = screen_prompt_injection(clean_message)
+    if is_injected:
+        return ChatResponse(
+            session_id=session_id,
+            answer=warning_msg or "Disallowed instruction override detected.",
+            sources=[],
+        )
+
+    # 3. Mask sensitive PII (payment cards, emails, phone numbers) before LLM & persistence
+    clean_message = mask_pii(clean_message)
+
+    # 4. Load recent conversation history (last 4 messages) for multi-turn context
     stmt = (
         select(Message)
         .where(Message.session_id == session_id)
@@ -90,7 +103,7 @@ def send_chat_message(
     past_messages = list(reversed(db.execute(stmt).scalars().all()))
     history = [{"role": m.role, "content": m.content} for m in past_messages]
 
-    # 3. Persist User Message
+    # 5. Persist Sanitized User Message
     user_record = Message(
         session_id=session_id,
         role="user",
@@ -100,12 +113,12 @@ def send_chat_message(
     db.add(user_record)
     db.commit()
 
-    # 4. Run Agent Loop with Tools and Contextual History
+    # 6. Run Agent Loop with Tools and Contextual History
     agent_result = run_agent(
         clean_message, user_id=current_user.id, conversation_history=history
     )
 
-    # 5. Persist Assistant Response with Cited Sources
+    # 7. Persist Assistant Response with Cited Sources
     assistant_record = Message(
         session_id=session_id,
         role="assistant",
@@ -149,6 +162,25 @@ def stream_chat_message(
         )
 
     session_id = payload.session_id.strip() if payload.session_id else str(uuid.uuid4())
+
+    # Screen for prompt injection / instruction override attempts
+    is_injected, warning_msg = screen_prompt_injection(clean_message)
+    if is_injected:
+        def blocked_generator() -> Generator[str, None, None]:
+            yield f"data: {json.dumps({'type': 'meta', 'session_id': session_id})}\n\n"
+            msg = warning_msg or "Disallowed instruction override detected."
+            yield f"data: {json.dumps({'type': 'token', 'token': msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'answer': msg, 'sources': [], 'approval_required': None})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            blocked_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+
+    # Mask sensitive PII before persistence and LLM processing
+    clean_message = mask_pii(clean_message)
 
     # 1. Load recent conversation history (last 4 messages) for multi-turn context
     db = SessionLocal()
