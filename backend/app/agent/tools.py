@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.models.order import Order
 from app.rag.hybrid import hybrid_search
+from app.rag.rerank import rerank_chunks
 from app.rag.retrieve import retrieve_chunks
 
 
@@ -31,7 +32,8 @@ def search_docs(query: str, top_k: int = 3) -> Dict[str, Any]:
     if not clean_query:
         return {"found": False, "sources": [], "content": "Empty search query provided."}
 
-    chunks = hybrid_search(clean_query, top_k=top_k)
+    candidates = hybrid_search(clean_query, top_k=15)
+    chunks = rerank_chunks(clean_query, candidates, top_k=top_k)
     if not chunks:
         return {
             "found": False,

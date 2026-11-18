@@ -11,6 +11,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from app.rag.hybrid import hybrid_search
+from app.rag.rerank import rerank_chunks
 from app.rag.retrieve import RetrievedChunk, retrieve_chunks
 from app.services.llm import generate_completion, stream_completion
 
@@ -66,8 +67,9 @@ def answer_question(
     Returns:
         AnswerResult containing the generated answer, source list, and retrieved chunks.
     """
-    # 1. Retrieve relevant chunks via Hybrid Search (pgvector + full-text RRF)
-    chunks = hybrid_search(query, top_k=top_k)
+    # 1. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
+    candidates = hybrid_search(query, top_k=15)
+    chunks = rerank_chunks(query, candidates, top_k=top_k)
 
     # 2. If no chunks passed the threshold, refuse immediately (fast, saves tokens)
     if not chunks:
@@ -116,8 +118,9 @@ def stream_answer_question(
       - ("token", token_text, [])
       - ("done", full_answer_text, unique_sources_list)
     """
-    # 1. Retrieve relevant chunks via Hybrid Search (pgvector + full-text RRF)
-    chunks = hybrid_search(query, top_k=top_k)
+    # 1. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
+    candidates = hybrid_search(query, top_k=15)
+    chunks = rerank_chunks(query, candidates, top_k=top_k)
 
     # 2. If no chunks pass the threshold, refuse immediately
     if not chunks:

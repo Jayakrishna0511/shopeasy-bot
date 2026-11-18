@@ -37,6 +37,7 @@ class HybridChunk:
     fts_rank: Optional[int] = None
     vector_distance: Optional[float] = None
     fts_score: Optional[float] = None
+    rerank_score: Optional[float] = None
 
 
 def hybrid_search(

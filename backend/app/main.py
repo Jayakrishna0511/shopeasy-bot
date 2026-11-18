@@ -13,6 +13,11 @@ async def lifespan(app: FastAPI):
         get_embedding_model()
     except Exception as e:
         print(f"Warning: could not pre-warm embedding model at startup: {e}")
+    try:
+        from app.rag.rerank import get_reranker
+        get_reranker()
+    except Exception as e:
+        print(f"Warning: could not pre-warm reranker at startup: {e}")
     yield
 
 
