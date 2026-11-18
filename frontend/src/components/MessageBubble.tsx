@@ -50,19 +50,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {!isUser && onSpeak && (
             <button
               onClick={() => onSpeak(message.content)}
-              title="Read aloud"
+              title={isSpeaking ? "Speaking..." : "Read aloud"}
               style={{
                 background: "transparent",
                 border: "none",
                 cursor: "pointer",
                 padding: "0 2px",
                 fontSize: "12px",
-                opacity: 0.7,
+                opacity: isSpeaking ? 1 : 0.7,
                 display: "inline-flex",
                 alignItems: "center",
+                color: isSpeaking ? "#4f46e5" : "inherit",
               }}
               onMouseEnter={(e) => ((e.target as HTMLElement).style.opacity = "1")}
-              onMouseLeave={(e) => ((e.target as HTMLElement).style.opacity = "0.7")}
+              onMouseLeave={(e) => ((e.target as HTMLElement).style.opacity = isSpeaking ? "1" : "0.7")}
             >
               🔊
             </button>
