@@ -15,15 +15,19 @@ from app.db import SessionLocal
 from app.models.order import Order
 from app.rag.hybrid import hybrid_search
 from app.rag.rerank import rerank_chunks
+from app.rag.rewrite import rewrite_query
 from app.rag.retrieve import retrieve_chunks
 
 
-def search_docs(query: str, top_k: int = 3) -> Dict[str, Any]:
-    """Search ShopEasy policy documents using hybrid search (pgvector + full-text RRF).
+def search_docs(
+    query: str, top_k: int = 3, history: Optional[List[Dict[str, str]]] = None
+) -> Dict[str, Any]:
+    """Search ShopEasy policy documents using hybrid search (pgvector + full-text RRF) and cross-encoder reranking.
 
     Args:
         query: Customer query or policy topic to search.
         top_k: Number of chunks to retrieve.
+        history: Optional conversation history for contextual query rewriting.
 
     Returns:
         Dict with search results, sources, and concatenated text.
@@ -32,12 +36,15 @@ def search_docs(query: str, top_k: int = 3) -> Dict[str, Any]:
     if not clean_query:
         return {"found": False, "sources": [], "content": "Empty search query provided."}
 
-    candidates = hybrid_search(clean_query, top_k=15)
-    chunks = rerank_chunks(clean_query, candidates, top_k=top_k)
+    # Contextual query rewriting for conversational follow-ups
+    search_query = rewrite_query(clean_query, history=history) if history else clean_query
+
+    candidates = hybrid_search(search_query, top_k=15)
+    chunks = rerank_chunks(search_query, candidates, top_k=top_k)
     if not chunks:
         return {
             "found": False,
-            "query": clean_query,
+            "query": search_query,
             "sources": [],
             "content": "No relevant policy documents found matching this query.",
         }

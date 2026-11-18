@@ -54,7 +54,7 @@ def _generate_anthropic(
 def _generate_gemini(
     prompt: str, system_prompt: Optional[str], key: str, max_tokens: int
 ) -> str:
-    models_to_try = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+    models_to_try = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": max_tokens},
@@ -71,7 +71,7 @@ def _generate_gemini(
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(req, timeout=7) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 return res["candidates"][0]["content"]["parts"][0]["text"].strip()
         except urllib.error.HTTPError as e:
@@ -129,7 +129,7 @@ def _stream_anthropic(
 def _stream_gemini(
     prompt: str, system_prompt: Optional[str], key: str, max_tokens: int
 ) -> Generator[str, None, None]:
-    models_to_try = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+    models_to_try = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": max_tokens},

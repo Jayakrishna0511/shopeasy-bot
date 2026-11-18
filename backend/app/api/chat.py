@@ -80,7 +80,17 @@ def send_chat_message(
     # 1. Determine or generate session_id
     session_id = payload.session_id.strip() if payload.session_id else str(uuid.uuid4())
 
-    # 2. Persist User Message
+    # 2. Load recent conversation history (last 4 messages) for multi-turn context
+    stmt = (
+        select(Message)
+        .where(Message.session_id == session_id)
+        .order_by(Message.created_at.desc())
+        .limit(4)
+    )
+    past_messages = list(reversed(db.execute(stmt).scalars().all()))
+    history = [{"role": m.role, "content": m.content} for m in past_messages]
+
+    # 3. Persist User Message
     user_record = Message(
         session_id=session_id,
         role="user",
@@ -90,10 +100,12 @@ def send_chat_message(
     db.add(user_record)
     db.commit()
 
-    # 3. Run Agent Loop with Tools
-    agent_result = run_agent(clean_message, user_id=current_user.id)
+    # 4. Run Agent Loop with Tools and Contextual History
+    agent_result = run_agent(
+        clean_message, user_id=current_user.id, conversation_history=history
+    )
 
-    # 4. Persist Assistant Response with Cited Sources
+    # 5. Persist Assistant Response with Cited Sources
     assistant_record = Message(
         session_id=session_id,
         role="assistant",
@@ -138,9 +150,20 @@ def stream_chat_message(
 
     session_id = payload.session_id.strip() if payload.session_id else str(uuid.uuid4())
 
-    # 1. Persist User Message
+    # 1. Load recent conversation history (last 4 messages) for multi-turn context
     db = SessionLocal()
+    history = []
     try:
+        stmt = (
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.created_at.desc())
+            .limit(4)
+        )
+        past_messages = list(reversed(db.execute(stmt).scalars().all()))
+        history = [{"role": m.role, "content": m.content} for m in past_messages]
+
+        # 2. Persist User Message
         user_record = Message(
             session_id=session_id,
             role="user",
@@ -156,8 +179,10 @@ def stream_chat_message(
         # Emit initial metadata
         yield f"data: {json.dumps({'type': 'meta', 'session_id': session_id})}\n\n"
 
-        # Execute Agent Loop
-        agent_res = run_agent(clean_message, user_id=current_user.id)
+        # Execute Agent Loop with conversation history
+        agent_res = run_agent(
+            clean_message, user_id=current_user.id, conversation_history=history
+        )
 
         # Stream the tokens to the frontend
         words = agent_res.answer.split(" ")

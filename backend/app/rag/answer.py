@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import sys
 from pathlib import Path
-from typing import Generator, List, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 # Add backend directory to sys.path
 backend_dir = Path(__file__).resolve().parent.parent.parent
@@ -12,6 +12,7 @@ if str(backend_dir) not in sys.path:
 
 from app.rag.hybrid import hybrid_search
 from app.rag.rerank import rerank_chunks
+from app.rag.rewrite import rewrite_query
 from app.rag.retrieve import RetrievedChunk, retrieve_chunks
 from app.services.llm import generate_completion, stream_completion
 
@@ -56,6 +57,7 @@ def answer_question(
     query: str,
     top_k: int = 4,
     distance_threshold: float = 0.75,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> AnswerResult:
     """Retrieve relevant chunks via Hybrid Search (RRF) and generate a grounded answer.
 
@@ -63,13 +65,17 @@ def answer_question(
         query: User's question.
         top_k: Maximum number of chunks to retrieve.
         distance_threshold: Threshold for relevance filtering.
+        history: Optional previous conversation messages for query rewriting.
 
     Returns:
         AnswerResult containing the generated answer, source list, and retrieved chunks.
     """
-    # 1. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
-    candidates = hybrid_search(query, top_k=15)
-    chunks = rerank_chunks(query, candidates, top_k=top_k)
+    # 1. Rewrite query if conversational history is provided
+    search_query = rewrite_query(query, history=history) if history else query
+
+    # 2. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
+    candidates = hybrid_search(search_query, top_k=15)
+    chunks = rerank_chunks(search_query, candidates, top_k=top_k)
 
     # 2. If no chunks passed the threshold, refuse immediately (fast, saves tokens)
     if not chunks:
@@ -111,6 +117,7 @@ def stream_answer_question(
     query: str,
     top_k: int = 4,
     distance_threshold: float = 0.75,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> Generator[Tuple[str, str, List[str]], None, None]:
     """Retrieve relevant chunks and yield streaming answer tokens.
 
@@ -118,9 +125,12 @@ def stream_answer_question(
       - ("token", token_text, [])
       - ("done", full_answer_text, unique_sources_list)
     """
-    # 1. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
-    candidates = hybrid_search(query, top_k=15)
-    chunks = rerank_chunks(query, candidates, top_k=top_k)
+    # 1. Rewrite query if conversational history is provided
+    search_query = rewrite_query(query, history=history) if history else query
+
+    # 2. Retrieve candidates via Hybrid Search (pgvector + full-text RRF), then Cross-Encoder rerank
+    candidates = hybrid_search(search_query, top_k=15)
+    chunks = rerank_chunks(search_query, candidates, top_k=top_k)
 
     # 2. If no chunks pass the threshold, refuse immediately
     if not chunks:

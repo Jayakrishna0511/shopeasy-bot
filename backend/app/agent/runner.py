@@ -52,11 +52,16 @@ class AgentResult:
     approval_required: Optional[Dict[str, Any]] = None
 
 
-def _execute_tool(name: str, args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+def _execute_tool(
+    name: str,
+    args: Dict[str, Any],
+    user_id: str,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """Execute a tool call safely in code with the authenticated user_id injected."""
     if name == "search_docs":
         query = args.get("query", "")
-        return search_docs(query)
+        return search_docs(query, history=conversation_history)
 
     elif name == "get_order_status":
         order_id = args.get("order_id", "")
@@ -92,7 +97,7 @@ def run_agent(
     provider = detect_provider(key)
 
     # Gemini Native Function Calling
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={key}"
     gemini_tools = [
         {
             "function_declarations": [
@@ -160,7 +165,12 @@ def run_agent(
                 tools_called.append({"name": fn_name, "args": fn_args})
 
                 # Execute tool in code
-                tool_output = _execute_tool(fn_name, fn_args, user_id=user_id)
+                tool_output = _execute_tool(
+                    fn_name,
+                    fn_args,
+                    user_id=user_id,
+                    conversation_history=conversation_history,
+                )
 
                 # Collect sources if search_docs was called
                 if fn_name == "search_docs" and "sources" in tool_output:
