@@ -5,12 +5,16 @@ interface MessageBubbleProps {
   message: ChatMessage;
   onApprove?: (token: string) => void;
   isApproving?: boolean;
+  onSpeak?: (text: string) => void;
+  isSpeaking?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   onApprove,
   isApproving,
+  onSpeak,
+  isSpeaking,
 }) => {
   const isUser = message.role === "user";
 
@@ -43,6 +47,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <span>{isUser ? "You" : "🤖 ShopEasy Assistant"}</span>
           <span>•</span>
           <span>{message.createdAt}</span>
+          {!isUser && onSpeak && (
+            <button
+              onClick={() => onSpeak(message.content)}
+              title="Read aloud"
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "0 2px",
+                fontSize: "12px",
+                opacity: 0.7,
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+              onMouseEnter={(e) => ((e.target as HTMLElement).style.opacity = "1")}
+              onMouseLeave={(e) => ((e.target as HTMLElement).style.opacity = "0.7")}
+            >
+              🔊
+            </button>
+          )}
         </div>
 
         <div

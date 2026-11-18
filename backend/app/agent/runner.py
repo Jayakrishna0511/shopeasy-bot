@@ -9,6 +9,7 @@ Enforces:
 
 from dataclasses import dataclass, field
 import json
+import time
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional
@@ -128,6 +129,8 @@ def run_agent(
     collected_sources: List[str] = []
     pending_approval: Optional[Dict[str, Any]] = None
 
+    models_to_try = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
+
     for step in range(max_steps):
         payload = {
             "contents": contents,
@@ -136,14 +139,31 @@ def run_agent(
             "generationConfig": {"maxOutputTokens": 1024},
         }
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
+        data = None
+        for model in models_to_try:
+            model_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+            req = urllib.request.Request(
+                model_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    break
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    time.sleep(1.5)
+                    continue
+                continue
+            except Exception:
+                continue
 
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        if not data:
+            return AgentResult(
+                answer="Our support service is currently experiencing high traffic. Please wait a moment and try again.",
+                sources=[],
+            )
 
         candidates = data.get("candidates", [])
         if not candidates:

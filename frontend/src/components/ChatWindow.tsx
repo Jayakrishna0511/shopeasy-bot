@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { type ChatMessage } from "../api/client";
+import { useVoice } from "../hooks/useVoice";
 import { MessageBubble } from "./MessageBubble";
 
 interface ChatWindowProps {
@@ -25,6 +26,22 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const {
+    isListening,
+    isSpeaking,
+    speechSupported,
+    autoSpeakEnabled,
+    startListening,
+    stopListening,
+    speak,
+    stopSpeaking,
+    toggleAutoSpeak,
+  } = useVoice({
+    onTranscript: (liveTranscript) => {
+      setInput(liveTranscript);
+    },
+  });
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -33,8 +50,21 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     scrollToBottom();
   }, [messages, isLoading]);
 
+  // Auto-speak new assistant responses if enabled
+  useEffect(() => {
+    if (autoSpeakEnabled && messages.length > 0 && !isLoading) {
+      const last = messages[messages.length - 1];
+      if (last.role === "assistant") {
+        speak(last.content);
+      }
+    }
+  }, [messages, isLoading, autoSpeakEnabled, speak]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isListening) {
+      stopListening();
+    }
     const cleanText = input.trim();
     if (!cleanText || isLoading) return;
 
@@ -57,6 +87,65 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03)",
       }}
     >
+      {/* Voice & Assistant Header Bar */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "8px 16px",
+          backgroundColor: "#ffffff",
+          borderBottom: "1px solid #e2e8f0",
+          fontSize: "12px",
+          color: "#64748b",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span>ShopEasy Hyderabad Support</span>
+          {isSpeaking && (
+            <span style={{ color: "#4f46e5", fontWeight: 600 }}>🔊 Speaking...</span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {isSpeaking && (
+            <button
+              onClick={stopSpeaking}
+              style={{
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#dc2626",
+                borderRadius: "6px",
+                padding: "2px 8px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: 600,
+              }}
+            >
+              Stop Audio
+            </button>
+          )}
+          <button
+            onClick={toggleAutoSpeak}
+            title={autoSpeakEnabled ? "Auto-speak enabled" : "Click to auto-read answers"}
+            style={{
+              background: autoSpeakEnabled ? "#eef2ff" : "#f1f5f9",
+              border: `1px solid ${autoSpeakEnabled ? "#c7d2fe" : "#cbd5e1"}`,
+              color: autoSpeakEnabled ? "#4338ca" : "#64748b",
+              borderRadius: "6px",
+              padding: "3px 8px",
+              cursor: "pointer",
+              fontSize: "11px",
+              fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <span>{autoSpeakEnabled ? "🔊 Auto-Read On" : "🔈 Auto-Read Off"}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Chat Messages Scroll Container */}
       <div
         style={{
@@ -83,7 +172,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               Welcome to ShopEasy Support
             </div>
             <div style={{ fontSize: "13px", maxWidth: "340px", lineHeight: "1.5" }}>
-              Ask anything about returns, shipping, cancellations, warranty, or payment errors.
+              Ask anything by typing or using the 🎙️ microphone button (returns, orders, cancellations, warranties).
             </div>
           </div>
         ) : (
@@ -93,6 +182,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               message={msg}
               onApprove={onApprove}
               isApproving={isApproving}
+              onSpeak={speak}
+              isSpeaking={isSpeaking}
             />
           ))
         )}
@@ -158,15 +249,53 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Active Voice Listening Banner */}
+      {isListening && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 16px",
+            backgroundColor: "#fef2f2",
+            borderTop: "1px solid #fecaca",
+            color: "#b91c1c",
+            fontSize: "12px",
+            fontWeight: 500,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "14px" }}>🔴</span>
+            <span>Listening... Speak your question (e.g. "Can I return opened earbuds?")</span>
+          </div>
+          <button
+            type="button"
+            onClick={stopListening}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              backgroundColor: "#dc2626",
+              color: "#ffffff",
+              border: "none",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Done
+          </button>
+        </div>
+      )}
+
       {/* Input Form Bar */}
       <form
         onSubmit={handleSubmit}
         style={{
           display: "flex",
-          gap: "10px",
+          gap: "8px",
           padding: "14px 18px",
           backgroundColor: "#ffffff",
-          borderTop: "1px solid #e2e8f0",
+          borderTop: isListening ? "none" : "1px solid #e2e8f0",
           alignItems: "center",
         }}
       >
@@ -177,17 +306,21 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             value={input}
             maxLength={1000}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about policies, order status, or request a cancellation..."
+            placeholder={
+              isListening
+                ? "Listening to your voice..."
+                : "Ask about policies, order status, or click 🎙️ to speak..."
+            }
             disabled={isLoading}
             style={{
               width: "100%",
               padding: "12px 64px 12px 16px",
               borderRadius: "10px",
-              border: "1px solid #cbd5e1",
+              border: `1px solid ${isListening ? "#f87171" : "#cbd5e1"}`,
               outline: "none",
               fontSize: "14px",
               color: "#0f172a",
-              backgroundColor: isLoading ? "#f1f5f9" : "#ffffff",
+              backgroundColor: isLoading ? "#f1f5f9" : isListening ? "#fff5f5" : "#ffffff",
               boxSizing: "border-box",
             }}
           />
@@ -206,6 +339,34 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </span>
           )}
         </div>
+
+        {/* Microphone Button */}
+        {speechSupported && (
+          <button
+            type="button"
+            onClick={isListening ? stopListening : startListening}
+            disabled={isLoading}
+            title={isListening ? "Stop listening" : "Click to speak with voice"}
+            style={{
+              padding: "10px 14px",
+              borderRadius: "10px",
+              backgroundColor: isListening ? "#dc2626" : "#f1f5f9",
+              color: isListening ? "#ffffff" : "#475569",
+              border: `1px solid ${isListening ? "#b91c1c" : "#cbd5e1"}`,
+              cursor: isLoading ? "not-allowed" : "pointer",
+              fontSize: "16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+              boxShadow: isListening ? "0 0 0 3px rgba(220, 38, 38, 0.25)" : "none",
+            }}
+          >
+            {isListening ? "⏹️" : "🎙️"}
+          </button>
+        )}
+
+        {/* Send Button */}
         <button
           type="submit"
           disabled={isLoading || !input.trim()}

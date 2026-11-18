@@ -66,6 +66,26 @@ export async function getMe(userId?: string): Promise<UserProfile> {
   return res.json();
 }
 
+export async function sendVoiceTranscript(
+  transcript: string,
+  sessionId?: string,
+  userId?: string
+): Promise<ChatResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (userId) headers["X-User-Id"] = userId;
+
+  const res = await fetch("/api/voice", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ transcript, session_id: sessionId || null }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || `Server error (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
 export async function sendChatMessage(
   message: string,
   sessionId?: string,
