@@ -13,16 +13,16 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models.order import Order
+from app.rag.hybrid import hybrid_search
 from app.rag.retrieve import retrieve_chunks
 
 
-def search_docs(query: str, top_k: int = 3, distance_threshold: float = 0.75) -> Dict[str, Any]:
-    """Search ShopEasy policy documents using vector similarity.
+def search_docs(query: str, top_k: int = 3) -> Dict[str, Any]:
+    """Search ShopEasy policy documents using hybrid search (pgvector + full-text RRF).
 
     Args:
         query: Customer query or policy topic to search.
         top_k: Number of chunks to retrieve.
-        distance_threshold: Maximum allowed cosine distance.
 
     Returns:
         Dict with search results, sources, and concatenated text.
@@ -31,7 +31,7 @@ def search_docs(query: str, top_k: int = 3, distance_threshold: float = 0.75) ->
     if not clean_query:
         return {"found": False, "sources": [], "content": "Empty search query provided."}
 
-    chunks = retrieve_chunks(clean_query, top_k=top_k, distance_threshold=distance_threshold)
+    chunks = hybrid_search(clean_query, top_k=top_k)
     if not chunks:
         return {
             "found": False,

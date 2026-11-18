@@ -10,6 +10,7 @@ backend_dir = Path(__file__).resolve().parent.parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
+from app.rag.hybrid import hybrid_search
 from app.rag.retrieve import RetrievedChunk, retrieve_chunks
 from app.services.llm import generate_completion, stream_completion
 
@@ -55,7 +56,7 @@ def answer_question(
     top_k: int = 4,
     distance_threshold: float = 0.75,
 ) -> AnswerResult:
-    """Retrieve relevant chunks and generate a grounded answer with citations.
+    """Retrieve relevant chunks via Hybrid Search (RRF) and generate a grounded answer.
 
     Args:
         query: User's question.
@@ -65,8 +66,8 @@ def answer_question(
     Returns:
         AnswerResult containing the generated answer, source list, and retrieved chunks.
     """
-    # 1. Retrieve relevant chunks from Neon pgvector
-    chunks = retrieve_chunks(query, top_k=top_k, distance_threshold=distance_threshold)
+    # 1. Retrieve relevant chunks via Hybrid Search (pgvector + full-text RRF)
+    chunks = hybrid_search(query, top_k=top_k)
 
     # 2. If no chunks passed the threshold, refuse immediately (fast, saves tokens)
     if not chunks:
@@ -115,8 +116,8 @@ def stream_answer_question(
       - ("token", token_text, [])
       - ("done", full_answer_text, unique_sources_list)
     """
-    # 1. Retrieve relevant chunks from Neon pgvector
-    chunks = retrieve_chunks(query, top_k=top_k, distance_threshold=distance_threshold)
+    # 1. Retrieve relevant chunks via Hybrid Search (pgvector + full-text RRF)
+    chunks = hybrid_search(query, top_k=top_k)
 
     # 2. If no chunks pass the threshold, refuse immediately
     if not chunks:
