@@ -7,11 +7,17 @@ MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 def get_embedding_model():
-    """Lazy-load and return the SentenceTransformer model singleton."""
+    """Lazy-load and return the SentenceTransformer model singleton.
+    
+    Prefers local cached weights to avoid unauthenticated Hugging Face Hub checks.
+    """
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer(MODEL_NAME)
+        try:
+            _model = SentenceTransformer(MODEL_NAME, local_files_only=True)
+        except Exception:
+            _model = SentenceTransformer(MODEL_NAME)
     return _model
 
 

@@ -30,7 +30,7 @@ class RetrievedChunk:
 def retrieve_chunks(
     query: str,
     top_k: int = 4,
-    distance_threshold: float = 0.70,
+    distance_threshold: float = 0.75,
 ) -> List[RetrievedChunk]:
     """Retrieve the top_k most similar document chunks for a query from Neon pgvector.
 

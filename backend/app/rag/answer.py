@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import sys
 from pathlib import Path
-from typing import List
+from typing import Generator, List, Tuple
 
 # Add backend directory to sys.path
 backend_dir = Path(__file__).resolve().parent.parent.parent
@@ -11,7 +11,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from app.rag.retrieve import RetrievedChunk, retrieve_chunks
-from app.services.llm import generate_completion
+from app.services.llm import generate_completion, stream_completion
 
 REFUSAL_ANSWER = "I don't know based on the provided documents."
 
@@ -53,7 +53,7 @@ def format_sources_block(chunks: List[RetrievedChunk]) -> str:
 def answer_question(
     query: str,
     top_k: int = 4,
-    distance_threshold: float = 0.65,
+    distance_threshold: float = 0.75,
 ) -> AnswerResult:
     """Retrieve relevant chunks and generate a grounded answer with citations.
 
@@ -102,3 +102,43 @@ def answer_question(
         sources=source_names,
         chunks=chunks,
     )
+
+
+def stream_answer_question(
+    query: str,
+    top_k: int = 4,
+    distance_threshold: float = 0.75,
+) -> Generator[Tuple[str, str, List[str]], None, None]:
+    """Retrieve relevant chunks and yield streaming answer tokens.
+
+    Yields tuples of:
+      - ("token", token_text, [])
+      - ("done", full_answer_text, unique_sources_list)
+    """
+    # 1. Retrieve relevant chunks from Neon pgvector
+    chunks = retrieve_chunks(query, top_k=top_k, distance_threshold=distance_threshold)
+
+    # 2. If no chunks pass the threshold, refuse immediately
+    if not chunks:
+        yield ("token", REFUSAL_ANSWER, [])
+        yield ("done", REFUSAL_ANSWER, [])
+        return
+
+    # 3. Format prompt with <sources>
+    sources_block = format_sources_block(chunks)
+    prompt = f"{sources_block}\n\nUser Question: {query}\n\nAnswer:"
+    source_names = list(dict.fromkeys(c.source for c in chunks))
+
+    # 4. Stream tokens from LLM
+    full_text_parts = []
+    try:
+        for token in stream_completion(prompt=prompt, system_prompt=SYSTEM_PROMPT):
+            full_text_parts.append(token)
+            yield ("token", token, [])
+    except Exception as e:
+        err_msg = f"\n[LLM Error: {e}]"
+        full_text_parts.append(err_msg)
+        yield ("token", err_msg, [])
+
+    full_answer = "".join(full_text_parts).strip()
+    yield ("done", full_answer, source_names)

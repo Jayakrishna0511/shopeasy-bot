@@ -12,7 +12,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
 # Add backend directory to sys.path
 backend_dir = Path(__file__).resolve().parent.parent.parent
@@ -71,7 +71,7 @@ def _generate_gemini(
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=7) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 return res["candidates"][0]["content"]["parts"][0]["text"].strip()
         except urllib.error.HTTPError as e:
@@ -105,3 +105,95 @@ def generate_completion(
         return _generate_anthropic(prompt, system_prompt, key, max_tokens)
     else:
         return _generate_gemini(prompt, system_prompt, key, max_tokens)
+
+
+def _stream_anthropic(
+    prompt: str, system_prompt: Optional[str], key: str, max_tokens: int
+) -> Generator[str, None, None]:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=key)
+    kwargs = {
+        "model": "claude-3-5-haiku-20241022",
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if system_prompt:
+        kwargs["system"] = system_prompt
+
+    with client.messages.stream(**kwargs) as stream:
+        for text in stream.text_stream:
+            yield text
+
+
+def _stream_gemini(
+    prompt: str, system_prompt: Optional[str], key: str, max_tokens: int
+) -> Generator[str, None, None]:
+    models_to_try = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    }
+    if system_prompt:
+        payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+    data = json.dumps(payload).encode("utf-8")
+    last_error = None
+
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={key}"
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                yielded_any = False
+                for line in resp:
+                    line_str = line.decode("utf-8").strip()
+                    if line_str.startswith("data:"):
+                        try:
+                            chunk_data = json.loads(line_str[5:].strip())
+                            candidates = chunk_data.get("candidates", [])
+                            if candidates and "content" in candidates[0]:
+                                parts = candidates[0]["content"].get("parts", [])
+                                if parts and "text" in parts[0]:
+                                    token = parts[0]["text"]
+                                    if token:
+                                        yielded_any = True
+                                        yield token
+                        except Exception:
+                            continue
+                if yielded_any:
+                    return
+        except urllib.error.HTTPError as e:
+            last_error = e
+            continue
+        except Exception as e:
+            last_error = e
+            continue
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("All Gemini streaming model endpoints failed.")
+
+
+def stream_completion(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    max_tokens: int = 1024,
+) -> Generator[str, None, None]:
+    """Unified streaming completion interface.
+
+    Auto-detects the provider (Anthropic or Gemini) from the key format in .env.
+    Yields text chunks as they arrive from the model.
+    """
+    key = settings.anthropic_api_key.strip()
+    if not key:
+        raise ValueError("No API key configured in .env.")
+
+    provider = detect_provider(key)
+
+    if provider == "anthropic":
+        yield from _stream_anthropic(prompt, system_prompt, key, max_tokens)
+    else:
+        yield from _stream_gemini(prompt, system_prompt, key, max_tokens)

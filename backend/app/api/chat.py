@@ -1,17 +1,21 @@
 """Chat API endpoints for ShopEasy customer support."""
 
+import json
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.agent.runner import run_agent
+from app.core.auth import get_current_user
+from app.db import SessionLocal, get_db
 from app.models.message import Message
-from app.rag.answer import answer_question
+from app.models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -29,6 +33,7 @@ class ChatResponse(BaseModel):
     session_id: str
     answer: str
     sources: List[str]
+    approval_required: Optional[Dict[str, Any]] = None
 
 
 class MessageItem(BaseModel):
@@ -45,6 +50,7 @@ class MessageItem(BaseModel):
 @router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 def send_chat_message(
     payload: ChatRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
     """Process a customer question through the RAG pipeline and persist conversation history.
@@ -76,23 +82,105 @@ def send_chat_message(
     db.add(user_record)
     db.commit()
 
-    # 3. Generate Grounded Answer via RAG Pipeline
-    result = answer_question(clean_message)
+    # 3. Run Agent Loop with Tools
+    agent_result = run_agent(clean_message, user_id=current_user.id)
 
     # 4. Persist Assistant Response with Cited Sources
     assistant_record = Message(
         session_id=session_id,
         role="assistant",
-        content=result.answer,
-        sources=result.sources,
+        content=agent_result.answer,
+        sources=agent_result.sources,
     )
     db.add(assistant_record)
     db.commit()
 
     return ChatResponse(
         session_id=session_id,
-        answer=result.answer,
-        sources=result.sources,
+        answer=agent_result.answer,
+        sources=agent_result.sources,
+        approval_required=agent_result.approval_required,
+    )
+
+
+@router.post("/stream")
+def stream_chat_message(
+    payload: ChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Stream answer tokens using Server-Sent Events (SSE) via the Agent Loop.
+
+    1. Validates message input
+    2. Assigns or reuses session_id
+    3. Persists user message
+    4. Executes Agent Runner (tool calling, policy search, order queries)
+    5. Streams answer tokens as SSE data events
+    6. Persists complete assistant message to database
+    7. Emits done event with approval_required payload (if cancel_order was triggered)
+    """
+    clean_message = payload.message.strip()
+    if not clean_message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message cannot be empty or only whitespace.",
+        )
+
+    session_id = payload.session_id.strip() if payload.session_id else str(uuid.uuid4())
+
+    # 1. Persist User Message
+    db = SessionLocal()
+    try:
+        user_record = Message(
+            session_id=session_id,
+            role="user",
+            content=clean_message,
+            sources=None,
+        )
+        db.add(user_record)
+        db.commit()
+    finally:
+        db.close()
+
+    def event_generator() -> Generator[str, None, None]:
+        # Emit initial metadata
+        yield f"data: {json.dumps({'type': 'meta', 'session_id': session_id})}\n\n"
+
+        # Execute Agent Loop
+        agent_res = run_agent(clean_message, user_id=current_user.id)
+
+        # Stream the tokens to the frontend
+        words = agent_res.answer.split(" ")
+        for i, word in enumerate(words):
+            token = word if i == 0 else " " + word
+            yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
+
+        # Persist full assistant response
+        save_db = SessionLocal()
+        try:
+            bot_record = Message(
+                session_id=session_id,
+                role="assistant",
+                content=agent_res.answer,
+                sources=agent_res.sources,
+            )
+            save_db.add(bot_record)
+            save_db.commit()
+        except Exception as e:
+            print(f"Error saving assistant message: {e}")
+        finally:
+            save_db.close()
+
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'answer': agent_res.answer, 'sources': agent_res.sources, 'approval_required': agent_res.approval_required})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
