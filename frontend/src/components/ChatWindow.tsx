@@ -170,24 +170,42 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           alignItems: "center",
         }}
       >
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question about policy, shipping, or returns..."
-          disabled={isLoading}
-          style={{
-            flex: 1,
-            padding: "12px 16px",
-            borderRadius: "10px",
-            border: "1px solid #cbd5e1",
-            outline: "none",
-            fontSize: "14px",
-            color: "#0f172a",
-            backgroundColor: isLoading ? "#f1f5f9" : "#ffffff",
-          }}
-        />
+        <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center" }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            maxLength={1000}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about policies, order status, or request a cancellation..."
+            disabled={isLoading}
+            style={{
+              width: "100%",
+              padding: "12px 64px 12px 16px",
+              borderRadius: "10px",
+              border: "1px solid #cbd5e1",
+              outline: "none",
+              fontSize: "14px",
+              color: "#0f172a",
+              backgroundColor: isLoading ? "#f1f5f9" : "#ffffff",
+              boxSizing: "border-box",
+            }}
+          />
+          {input.length > 50 && (
+            <span
+              style={{
+                position: "absolute",
+                right: "12px",
+                fontSize: "11px",
+                color: input.length > 900 ? "#dc2626" : "#94a3b8",
+                fontWeight: 500,
+                pointerEvents: "none",
+              }}
+            >
+              {input.length}/1000
+            </span>
+          )}
+        </div>
         <button
           type="submit"
           disabled={isLoading || !input.trim()}

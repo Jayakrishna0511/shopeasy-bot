@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Generator, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -13,16 +13,22 @@ from sqlalchemy.orm import Session
 
 from app.agent.runner import run_agent
 from app.core.auth import get_current_user
+from app.core.rate_limit import check_rate_limit
 from app.db import SessionLocal, get_db
 from app.models.message import Message
 from app.models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+MAX_MESSAGE_LENGTH = 1000
+
 
 class ChatRequest(BaseModel):
     message: str = Field(
-        ..., min_length=1, max_length=2000, description="Customer question or message"
+        ...,
+        min_length=1,
+        max_length=MAX_MESSAGE_LENGTH,
+        description="Customer question capped at 1,000 characters",
     )
     session_id: Optional[str] = Field(
         None, description="Optional existing session ID to continue a conversation"
@@ -49,19 +55,21 @@ class MessageItem(BaseModel):
 
 @router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 def send_chat_message(
+    request: Request,
     payload: ChatRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
-    """Process a customer question through the RAG pipeline and persist conversation history.
+    """Process a customer question through the Agent pipeline and persist conversation history.
 
-    - Validates message input
+    - Enforces rate limiting (15 req/min)
+    - Validates message input (max 1,000 chars)
     - Assigns or reuses a session_id
-    - Saves the user's message to the messages table
-    - Runs vector retrieval and grounded answering
-    - Saves the assistant's response and cited sources to the messages table
-    - Returns the answer, cited sources, and session_id
+    - Saves user message to the messages table
+    - Runs Agent loop with tools
+    - Saves assistant response to the messages table
     """
+    check_rate_limit(request, current_user=current_user)
     clean_message = payload.message.strip()
     if not clean_message:
         raise HTTPException(
@@ -105,19 +113,22 @@ def send_chat_message(
 
 @router.post("/stream")
 def stream_chat_message(
+    request: Request,
     payload: ChatRequest,
     current_user: User = Depends(get_current_user),
 ):
     """Stream answer tokens using Server-Sent Events (SSE) via the Agent Loop.
 
-    1. Validates message input
-    2. Assigns or reuses session_id
-    3. Persists user message
-    4. Executes Agent Runner (tool calling, policy search, order queries)
-    5. Streams answer tokens as SSE data events
-    6. Persists complete assistant message to database
-    7. Emits done event with approval_required payload (if cancel_order was triggered)
+    1. Enforces rate limiting (15 req/min)
+    2. Validates message input (max 1,000 chars)
+    3. Assigns or reuses session_id
+    4. Persists user message
+    5. Executes Agent Runner (tool calling, policy search, order queries)
+    6. Streams answer tokens as SSE data events
+    7. Persists complete assistant message to database
+    8. Emits done event with approval_required payload (if cancel_order was triggered)
     """
+    check_rate_limit(request, current_user=current_user)
     clean_message = payload.message.strip()
     if not clean_message:
         raise HTTPException(
