@@ -6,3 +6,4 @@ psycopg[binary]>=3.1
 pgvector
 alembic
 sentence-transformers
+anthropic
