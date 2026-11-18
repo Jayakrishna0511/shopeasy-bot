@@ -31,11 +31,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     isSpeaking,
     speechSupported,
     autoSpeakEnabled,
+    voiceError,
     startListening,
     stopListening,
     speak,
     stopSpeaking,
     toggleAutoSpeak,
+    clearVoiceError,
   } = useVoice({
     onTranscript: (liveTranscript) => {
       setInput(liveTranscript);
@@ -243,6 +245,39 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 ×
               </button>
             )}
+          </div>
+        )}
+
+        {/* Voice Error Banner */}
+        {voiceError && (
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: "10px",
+              backgroundColor: "#fff1f2",
+              border: "1px solid #fecdd3",
+              color: "#e11d48",
+              fontSize: "13px",
+              marginBottom: "16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>🎙️ {voiceError}</span>
+            <button
+              onClick={clearVoiceError}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#e11d48",
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "16px",
+              }}
+            >
+              ×
+            </button>
           </div>
         )}
 

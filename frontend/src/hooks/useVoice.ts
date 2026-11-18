@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Web Speech API interface definitions for TypeScript
 interface IWindow extends Window {
   SpeechRecognition?: any;
   webkitSpeechRecognition?: any;
@@ -16,93 +15,118 @@ export function useVoice({ onTranscript, onAutoSubmit }: UseVoiceOptions = {}) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
 
-  const recognitionRef = useRef<any>(null);
-
-  // Check browser support on mount
+  // Keep latest callbacks in ref to avoid re-triggering effects and aborting recognition
+  const callbacksRef = useRef<UseVoiceOptions>({ onTranscript, onAutoSubmit });
   useEffect(() => {
+    callbacksRef.current = { onTranscript, onAutoSubmit };
+  }, [onTranscript, onAutoSubmit]);
+
+  const activeRecognitionRef = useRef<any>(null);
+
+  // Check if browser supports speech recognition
+  useEffect(() => {
+    const win = window as unknown as IWindow;
+    const SpeechRecognitionClass = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) {
+      setSpeechSupported(false);
+    }
+  }, []);
+
+  // Stop active speech recognition
+  const stopListening = useCallback(() => {
+    if (activeRecognitionRef.current) {
+      try {
+        activeRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      activeRecognitionRef.current = null;
+    }
+    setIsListening(false);
+  }, []);
+
+  // Start fresh speech recognition session
+  const startListening = useCallback(() => {
+    setVoiceError(null);
     const win = window as unknown as IWindow;
     const SpeechRecognitionClass = win.SpeechRecognition || win.webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
-      setSpeechSupported(false);
+      setVoiceError("Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.");
       return;
     }
 
-    const recognition = new SpeechRecognitionClass();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = "en-IN"; // English (India) default for ShopEasy Hyderabad
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-      let finalTranscript = "";
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-
-      const currentText = finalTranscript || interimTranscript;
-      if (currentText && onTranscript) {
-        onTranscript(currentText);
-      }
-
-      if (finalTranscript && onAutoSubmit) {
-        onAutoSubmit(finalTranscript.trim());
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn("Speech recognition error:", event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
+    // Stop any existing instance first
+    if (activeRecognitionRef.current) {
       try {
-        recognition.abort();
+        activeRecognitionRef.current.abort();
       } catch {
         // ignore
       }
-    };
-  }, [onTranscript, onAutoSubmit]);
-
-  // Start speech recognition
-  const startListening = useCallback(() => {
-    if (!recognitionRef.current) {
-      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
-      return;
     }
+
     try {
-      recognitionRef.current.start();
-    } catch (e) {
-      // If already started, stop and restart
-      recognitionRef.current.stop();
-    }
-  }, []);
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-IN"; // English (India) default
 
-  // Stop speech recognition
-  const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {
-        // ignore
-      }
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = "";
+        let finalTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const currentText = (finalTranscript || interimTranscript).trim();
+        if (currentText && callbacksRef.current.onTranscript) {
+          callbacksRef.current.onTranscript(currentText);
+        }
+
+        if (finalTranscript && callbacksRef.current.onAutoSubmit) {
+          callbacksRef.current.onAutoSubmit(finalTranscript.trim());
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error:", event.error);
+        setIsListening(false);
+
+        if (event.error === "not-allowed") {
+          setVoiceError("Microphone permission denied. Please allow microphone access in your browser address bar.");
+        } else if (event.error === "no-speech") {
+          // User didn't say anything, benign
+          setVoiceError(null);
+        } else if (event.error === "network") {
+          setVoiceError("Network error during speech recognition. Please check your connection.");
+        } else {
+          setVoiceError(`Voice error: ${event.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        activeRecognitionRef.current = null;
+      };
+
+      activeRecognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.error("Failed to start speech recognition:", err);
       setIsListening(false);
+      setVoiceError("Could not start microphone. Please check browser permissions.");
     }
   }, []);
 
@@ -112,7 +136,7 @@ export function useVoice({ onTranscript, onAutoSubmit }: UseVoiceOptions = {}) {
 
     window.speechSynthesis.cancel(); // Stop any ongoing speech
 
-    // Clean markdown symbols, asterisks, and citations [1] for natural speech
+    // Clean markdown symbols, asterisks, headers, and citations [1] for natural speech
     const cleanSpeechText = text
       .replace(/\[\d+\]/g, "")
       .replace(/\*\*(.*?)\*\*/g, "$1")
@@ -126,14 +150,17 @@ export function useVoice({ onTranscript, onAutoSubmit }: UseVoiceOptions = {}) {
     const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
+    utterance.lang = "en-IN";
 
     // Pick an English voice if available
     const voices = window.speechSynthesis.getVoices();
-    const englishVoice =
-      voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("en_IN")) ||
-      voices.find((v) => v.lang.startsWith("en"));
-    if (englishVoice) {
-      utterance.voice = englishVoice;
+    if (voices.length > 0) {
+      const englishVoice =
+        voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("en_IN")) ||
+        voices.find((v) => v.lang.startsWith("en"));
+      if (englishVoice) {
+        utterance.voice = englishVoice;
+      }
     }
 
     utterance.onstart = () => setIsSpeaking(true);
@@ -154,15 +181,21 @@ export function useVoice({ onTranscript, onAutoSubmit }: UseVoiceOptions = {}) {
     setAutoSpeakEnabled((prev) => !prev);
   }, []);
 
+  const clearVoiceError = useCallback(() => {
+    setVoiceError(null);
+  }, []);
+
   return {
     isListening,
     isSpeaking,
     speechSupported,
     autoSpeakEnabled,
+    voiceError,
     startListening,
     stopListening,
     speak,
     stopSpeaking,
     toggleAutoSpeak,
+    clearVoiceError,
   };
 }
